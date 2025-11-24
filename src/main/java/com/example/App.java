@@ -11,14 +11,18 @@ public class App {
      * результат работы бизнес-метода greet().
      */
     public static void main(String[] args) {
+        System.out.println("=== Java Maven CI/CD Demo ===");
         System.out.println(greet("World"));
+        System.out.println(greetFormal("Mr.", "Smith"));
     }
 
     /**
      * Бизнес-метод: формирует приветствие.
      */
     public static String greet(String name) {
-        // Здесь могла бы быть любая логика --- валидация, обработка и т.п.
+        if (name == null || name.trim().isEmpty()) {
+            return "Hello, Stranger!";
+        }
         return "Hello, " + name + "!";
     }
 
@@ -26,6 +30,9 @@ public class App {
      * Дополнительный метод для демонстрации новых возможностей
      */
     public static String greetFormal(String title, String name) {
+        if (title == null || name == null) {
+            return "Hello!";
+        }
         return "Hello, " + title + " " + name + "!";
     }
 }

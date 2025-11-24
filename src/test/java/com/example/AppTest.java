@@ -9,9 +9,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class AppTest {
 
-    /**
-     * Базовый тест: проверяем, что greet("World") возвращает ожидаемое значение.
-     */
     @Test
     void testGreet() {
         assertEquals("Hello, World!", App.greet("World"));
@@ -31,11 +28,19 @@ class AppTest {
 
     @Test
     void testGreetWithEmptyName() {
-        assertEquals("Hello, !", App.greet(""));
+        assertEquals("Hello, Stranger!", App.greet(""));
+        assertEquals("Hello, Stranger!", App.greet("   "));
     }
 
     @Test
     void testGreetWithNull() {
-        assertEquals("Hello, null!", App.greet(null));
+        assertEquals("Hello, Stranger!", App.greet(null));
+    }
+
+    @Test
+    void testGreetFormalWithNull() {
+        assertEquals("Hello!", App.greetFormal(null, "Smith"));
+        assertEquals("Hello!", App.greetFormal("Mr.", null));
+        assertEquals("Hello!", App.greetFormal(null, null));
     }
 }

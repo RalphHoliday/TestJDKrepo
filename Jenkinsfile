@@ -1,147 +1,131 @@
 /*
 Declarative Pipeline для Jenkins.
-Демонстрирует полный цикл: checkout → build → test → package → отчёты → (условный) деплой.
-Работает как на локальном Jenkins, так и на CI-сервере.
+Адаптирован для проекта в E:\Java\TestJDK
 */
 
 pipeline {
-    // Где будет выполняться пайплайн. 'any' --- любой Jenkins-агент.
     agent any
 
-    // Общие опции конвейера
     options {
-        // Добавляет метки времени в лог сборки
         timestamps()
-        // Обрезает историю сборок, хранит только последние 20
-        buildDiscarder(logRotator(numToKeepStr: '20'))
-        // Запрещает параллельные сборки одного job (полезно для локального демо)
+        buildDiscarder(logRotator(numToKeepStr: '10'))
         disableConcurrentBuilds()
     }
 
-    // Переменные окружения для стадий
     environment {
-        // Опции Maven: падать при ошибках тестов
         MAVEN_OPTS = '-Dmaven.test.failure.ignore=false'
+        PROJECT_DIR = 'E:\\Java\\TestJDK'
     }
 
-    // Триггеры запуска конвейера
     triggers {
-        // Периодически проверяет SCM (репозиторий) на изменения каждые ~2 минуты
-        pollSCM('H/2 * * * *')
-        // Для продакшена лучше настраивать webhooks, но локально pollSCM удобнее.
+        // Проверяем изменения каждые 3 минуты
+        pollSCM('H/3 * * * *')
     }
 
     stages {
-        // Стадия для исправления возможных проблем с правами Git в Windows
-        stage('Fix Git Ownership') {
-            steps {
-                bat 'git config --global --add safe.directory E:/repos/java-maven-ci-demo.git'
-            }
-        }
-
         stage('Checkout') {
             steps {
-                // Извлечение кода из Git. Для локального демо используем file:// путь к bare-репозиторию.
-                checkout([$class: 'GitSCM',
-                    branches: [[name: '*/${BRANCH_NAME ?: "main"}']],
-                    userRemoteConfigs: [[url: 'file:///E:/repos/java-maven-ci-demo.git']]
-                ])
+                script {
+                    echo "Checking out from local repository: ${PROJECT_DIR}"
+                    // Для локального проекта используем директорию напрямую
+                    bat "xcopy \"${PROJECT_DIR}\\*\" \".\\\" /E /I /Y"
+                }
             }
         }
 
         stage('Build') {
             steps {
-                // Проверка версии Maven
+                echo "Building project..."
                 bat 'mvn -v'
-                // Компиляция проекта. Параметры:
-                // -B: batch mode (без интерактивных вопросов)
-                // -U: принудительно обновить снапшоты (на случай зависимостей)
                 bat 'mvn -B -U clean compile'
             }
         }
 
         stage('Test') {
             steps {
-                // Запуск модульных тестов (JUnit 5) и сбор покрытия JaCoCo
+                echo "Running tests..."
                 bat 'mvn -B test'
             }
             post {
-                // Действия после стадии Test
                 always {
-                    // Публикация результатов JUnit (Surefire создаёт XML-отчёты в target/surefire-reports)
+                    // Публикация результатов JUnit тестов
                     junit '**/target/surefire-reports/*.xml'
-                    // Публикация HTML-отчёта JaCoCo (генерируется в target/site/jacoco/index.html)
-                    publishHTML([reportDir: 'target/site/jacoco',
-                                reportFiles: 'index.html',
-                                reportName: 'JaCoCo Coverage',
-                                keepAll: true])
+                    // Создаем простой отчет о тестах
+                    bat 'echo === TEST RESULTS === > test-report.txt'
+                    bat 'type target\\surefire-reports\\*.txt >> test-report.txt 2>nul || echo No test reports found >> test-report.txt'
+                    archiveArtifacts artifacts: 'test-report.txt', fingerprint: true
                 }
             }
         }
 
         stage('Package') {
             steps {
-                // Сборка исполняемого JAR. Артефакт будет в target/java-maven-ci-demo-1.0.0.jar
-                bat 'mvn -B package'
+                echo "Packaging application..."
+                bat 'mvn -B package -DskipTests'
             }
             post {
                 success {
-                    // Архивирование собранных артефактов в Jenkins (видны в UI job)
+                    // Архивируем собранный JAR
                     archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                    // Создаем информацию о сборке
+                    bat 'echo Build: %BUILD_NUMBER% > build-info.txt'
+                    bat 'echo Branch: %GIT_BRANCH% >> build-info.txt 2>nul || echo Branch: local >> build-info.txt'
+                    bat 'echo Date: %DATE% %TIME% >> build-info.txt'
+                    archiveArtifacts artifacts: 'build-info.txt', fingerprint: true
                 }
             }
         }
 
-        stage('Quality gates') {
-            // Стадия качества включается только для веток develop и main
-            when {
-                anyOf {
-                    branch 'develop'
-                    branch 'main'
-                }
-            }
+        stage('Verify') {
             steps {
-                // Здесь можно подключить статический анализ: SpotBugs, Checkstyle, SonarQube.
-                echo 'Quality checks placeholder: линтеры, статанализ, SonarQube и т.д.'
-                bat 'mvn -B checkstyle:checkstyle || echo "Checkstyle not configured, continuing..."'
-            }
-        }
-
-        stage('Deploy (local)') {
-            // Условный «деплой»: выполняем только для main
-            when {
-                branch 'main'
-            }
-            steps {
+                echo "Verifying package..."
                 script {
-                    echo "Starting deployment for branch: ${env.BRANCH_NAME}"
-                    // Останавливаем предыдущую версию приложения если запущена
-                    bat 'taskkill /F /IM java.exe 2>nul || echo "No Java process to kill"'
-                    // Запуск приложения в фоне и вывод логов в app.log
-                    // В учебных целях это имитация CD (continuous deployment).
-                    bat 'start /B java -jar target/java-maven-ci-demo-1.0.0.jar > app.log 2>&1'
-                    echo "Application deployed successfully. Check app.log for output."
+                    // Проверяем что JAR создан и работает
+                    bat 'java -jar target/java-maven-ci-demo-1.0.0.jar --version 2>nul || java -jar target/java-maven-ci-demo-1.0.0.jar > verify-output.txt'
+                    archiveArtifacts artifacts: 'verify-output.txt', fingerprint: true
+                }
+            }
+        }
+
+        stage('Demo Deploy') {
+            when {
+                expression {
+                    // Выполняем для всех сборок в демо-целях
+                    return true
+                }
+            }
+            steps {
+                echo "Demo deployment..."
+                script {
+                    // Просто демонстрируем что приложение работает
+                    bat 'echo === DEMO DEPLOYMENT === > deployment.log'
+                    bat 'echo Application would be deployed here >> deployment.log'
+                    bat 'echo JAR file: target/java-maven-ci-demo-1.0.0.jar >> deployment.log'
+                    bat 'echo Build completed successfully! >> deployment.log'
+                    archiveArtifacts artifacts: 'deployment.log', fingerprint: true
+
+                    // Показываем что приложение работает
+                    bat 'java -jar target/java-maven-ci-demo-1.0.0.jar'
                 }
             }
         }
     }
 
-    // Глобальные действия после конвейера
     post {
         always {
-            echo "Pipeline execution completed for ${env.BRANCH_NAME}"
-            // Очистка: останавливаем приложение после завершения пайплайна
-            bat 'taskkill /F /IM java.exe 2>nul || echo "Cleanup completed"'
+            echo "Pipeline execution completed for build: ${currentBuild.number}"
+            // Очистка временных файлов
+            bat 'del test-report.txt build-info.txt verify-output.txt deployment.log 2>nul || echo Cleanup completed'
         }
         success {
-            echo "Build successful for ${env.BRANCH_NAME}"
-            // Можно добавить уведомления: email, Slack и т.д.
+            echo "✅ Build ${currentBuild.number} completed successfully!"
+            // Можно добавить уведомления здесь
         }
         failure {
-            echo "Build failed for ${env.BRANCH_NAME}"
+            echo "❌ Build ${currentBuild.number} failed!"
         }
         unstable {
-            echo "Build unstable for ${env.BRANCH_NAME} - tests failed"
+            echo "⚠️ Build ${currentBuild.number} is unstable - tests failed"
         }
     }
 }
